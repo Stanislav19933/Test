@@ -42,7 +42,7 @@ class TestStreamlitApp(unittest.TestCase):
             button.click().run()
         self.assertEqual(len(app.exception), 0)
         self.assertNotIn("card", app.session_state)
-        self.assertTrue(any("Временный лимит 429" in item.message for item in app.error))
+        self.assertTrue(any("Временный лимит 429" in item.value for item in app.error))
 
     def test_short_ai_response_displays_real_incomplete_draft(self):
         import json
@@ -69,7 +69,7 @@ class TestStreamlitApp(unittest.TestCase):
         self.assertFalse(any("РЕДАКТОРСКИЙ ПРИМЕР" in item for item in card["review_warnings"]))
         self.assertTrue(len(card["seo_description"]) < 800)
         self.assertFalse(card["automated_checks_passed"])
-        self.assertTrue(any("не прошла проверку" in item.message for item in app.error))
+        self.assertTrue(any("не прошла проверку" in item.value for item in app.error))
 
 
 if __name__ == "__main__":
