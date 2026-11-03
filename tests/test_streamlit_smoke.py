@@ -29,7 +29,7 @@ class TestStreamlitApp(unittest.TestCase):
         self.assertTrue(any("РЕДАКТОРСКИЙ ПРИМЕР" in item for item in card["review_warnings"]))
         self.assertTrue(800 <= len(card["seo_description"]) <= 1200)
 
-    def test_zai_outage_displays_labelled_editorial_example(self):
+    def test_zai_outage_does_not_fake_result(self):
         from unittest.mock import patch
         from instrumentcard.zai_client import GenerationError
 
@@ -41,12 +41,10 @@ class TestStreamlitApp(unittest.TestCase):
             button = next(item for item in app.button if item.label == "Сгенерировать карточку")
             button.click().run()
         self.assertEqual(len(app.exception), 0)
-        card = app.session_state["card"]
-        self.assertTrue(any("РЕДАКТОРСКИЙ ПРИМЕР" in item for item in card["review_warnings"]))
-        self.assertTrue(any("не ответ модели" in item.value.lower() for item in app.warning))
-        self.assertTrue(800 <= len(card["seo_description"]) <= 1200)
+        self.assertNotIn("card", app.session_state)
+        self.assertTrue(any("Временный лимит 429" in item.message for item in app.error))
 
-    def test_short_ai_response_shows_labelled_complete_example(self):
+    def test_short_ai_response_displays_real_incomplete_draft(self):
         import json
         from unittest.mock import patch
 
@@ -68,9 +66,10 @@ class TestStreamlitApp(unittest.TestCase):
             button.click().run()
         self.assertEqual(len(app.exception), 0)
         card = app.session_state["card"]
-        self.assertTrue(any("РЕДАКТОРСКИЙ ПРИМЕР" in item for item in card["review_warnings"]))
-        self.assertTrue(800 <= len(card["seo_description"]) <= 1200)
-        self.assertTrue(any("не результат AI" in item.value for item in app.warning))
+        self.assertFalse(any("РЕДАКТОРСКИЙ ПРИМЕР" in item for item in card["review_warnings"]))
+        self.assertTrue(len(card["seo_description"]) < 800)
+        self.assertFalse(card["automated_checks_passed"])
+        self.assertTrue(any("не прошла проверку" in item.message for item in app.error))
 
 
 if __name__ == "__main__":

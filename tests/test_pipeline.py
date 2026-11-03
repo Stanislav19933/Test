@@ -118,7 +118,7 @@ class TestResponseValidation(unittest.TestCase):
         product = ProductInput(name="Датчик", specs={"Диапазон": "0–10 МПа"})
         response = {"choices": [{"finish_reason": "length", "message": {"content": "{}"}}]}
         with patch("instrumentcard.zai_client._api_call", return_value=response):
-            with self.assertRaisesRegex(GenerationError, "схеме"):
+            with self.assertRaisesRegex(GenerationError, "не хватает полей"):
                 generate_text(product, "fake-key")
 
 
@@ -211,7 +211,7 @@ class TestTemporaryZaiRecovery(unittest.TestCase):
 
     def test_both_unavailable_fail_honestly(self):
         with patch("instrumentcard.zai_client._api_call", side_effect=self.temp_error("overloaded")), patch("instrumentcard.zai_client.time.sleep"):
-            with self.assertRaisesRegex(GenerationError, "Обе бесплатные модели"):
+            with self.assertRaisesRegex(GenerationError, "Бесплатные модели Z.ai"):
                 generate_text(self.product, "fake")
 
     def test_keep_first_draft_if_correction_fails(self):
