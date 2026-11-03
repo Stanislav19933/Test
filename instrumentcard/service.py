@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
-from .groq_client import GenerationError, generate_text
+from .zai_client import GenerationError, generate_text
 from .models import CardOutput, GeneratedText, ProductInput
 from .quality import characteristic_list, missing_fields, validate_draft
 

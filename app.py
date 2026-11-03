@@ -9,7 +9,7 @@ from pathlib import Path
 import streamlit as st
 
 from instrumentcard.formatting import to_markdown
-from instrumentcard.groq_client import GenerationError
+from instrumentcard.zai_client import GenerationError
 from instrumentcard.models import CardOutput, GeneratedText
 from instrumentcard.quality import characteristic_list, missing_fields
 from instrumentcard.service import InputError, generate_card, parse_product
@@ -22,11 +22,11 @@ EXAMPLES = {
 
 
 def api_key() -> str:
-    key = os.getenv("GROQ_API_KEY", "")
+    key = os.getenv("ZAI_API_KEY", "")
     if key:
         return key
     try:
-        return str(st.secrets.get("GROQ_API_KEY", ""))
+        return str(st.secrets.get("ZAI_API_KEY", ""))
     except (FileNotFoundError, KeyError):
         return ""
 
@@ -39,7 +39,7 @@ def main() -> None:
     [data-testid='stMetricValue'] {font-size:1.6rem}
     </style>""", unsafe_allow_html=True)
     st.title("InstrumentCard AI")
-    st.caption("B2B-карточки измерительных приборов · проверка данных · Qwen 3.8 через Groq")
+    st.caption("B2B-карточки измерительных приборов · проверка данных · GLM-4.7-Flash через Z.ai")
 
     left, right = st.columns([1, 1.15], gap="large")
     with left:
@@ -82,7 +82,7 @@ def main() -> None:
             st.error(str(exc))
         enabled = bool(product and product.name and (product.specs or product.description))
         if not api_key():
-            st.info("Для генерации нужен GROQ_API_KEY. Данные-примеры и их проверку можно открыть без ключа.")
+            st.info("Для генерации нужен ZAI_API_KEY. Данные-примеры и их проверку можно открыть без ключа.")
         if st.button("Показать редакторский пример (без API)", use_container_width=True):
             sample_path = EXAMPLES[example_name]
             example_path = sample_path.with_name(sample_path.stem + "_editorial_example.json")
@@ -105,7 +105,7 @@ def main() -> None:
             ).model_dump()
         if st.button("Сгенерировать карточку", type="primary", use_container_width=True, disabled=not enabled):
             if not api_key():
-                st.error("API-ключ отсутствует. Укажите GROQ_API_KEY и перезапустите приложение.")
+                st.error("API-ключ отсутствует. Укажите ZAI_API_KEY и перезапустите приложение.")
             else:
                 try:
                     with st.spinner("Генерируем и проверяем факты…"):
@@ -122,7 +122,7 @@ def main() -> None:
             st.info("Загрузите пример или вставьте JSON, затем нажмите «Сгенерировать карточку».")
             st.markdown("**Как проверяется результат**")
             st.write("1. Исходные характеристики копируются дословно, без генерации.")
-            st.write("2. Модель возвращает четыре текстовых поля по строгой JSON-схеме.")
+            st.write("2. Модель возвращает четыре текстовых поля по схеме с локальной проверкой Pydantic.")
             st.write("3. Длина, количество запросов и новые числовые значения проверяются кодом.")
             st.write("4. Замечания остаются видимыми до проверки контент-менеджером.")
             st.stop()

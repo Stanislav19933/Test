@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from instrumentcard.groq_client import GenerationError, _api_call, generate_text
+from instrumentcard.zai_client import GenerationError, _api_call, generate_text
 from instrumentcard.models import GeneratedText, ProductInput
 from instrumentcard.quality import characteristic_list, missing_fields, numeric_claim_warnings, validate_draft
 from instrumentcard.service import InputError, generate_card, parse_product
@@ -98,33 +98,42 @@ class TestSampleExamples(unittest.TestCase):
                 draft = GeneratedText.model_validate_json((root / f"{slug}_editorial_example.json").read_text(encoding="utf-8"))
                 self.assertEqual(validate_draft(product, draft), [])
 
-    def test_groq_request_uses_strict_schema(self):
-        from instrumentcard.groq_client import OUTPUT_JSON_SCHEMA
+    def test_zai_request_uses_json_object_mode(self):
         product = ProductInput(name="Датчик 10", specs={"Диапазон": "0–10 МПа"})
         response = {"choices": [{"message": {"content": json.dumps({
             "seo_title": "Датчик 10", "seo_description": "Диапазон 0–10 МПа.",
             "search_queries": ["Датчик 10", "датчик давления", "датчик 0–10 МПа"],
             "commercial_block": "Измеряет давление."
         }, ensure_ascii=False)}}]}
-        with patch("instrumentcard.groq_client._api_call", return_value=response) as mocked:
+        with patch("instrumentcard.zai_client._api_call", return_value=response) as mocked:
             result = generate_text(product, "fake-key")
         self.assertEqual(result.seo_title, "Датчик 10")
         payload = mocked.call_args.args[0]
-        self.assertEqual(payload["response_format"]["json_schema"]["strict"], True)
-        self.assertEqual(payload["response_format"]["json_schema"]["schema"], OUTPUT_JSON_SCHEMA)
+        self.assertEqual(payload["model"], "glm-4.7-flash")
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
+
+class TestResponseValidation(unittest.TestCase):
+    def test_truncated_model_response_is_rejected(self):
+        product = ProductInput(name="Датчик", specs={"Диапазон": "0–10 МПа"})
+        response = {"choices": [{"finish_reason": "length", "message": {"content": "{}"}}]}
+        with patch("instrumentcard.zai_client._api_call", return_value=response):
+            with self.assertRaisesRegex(GenerationError, "схеме"):
+                generate_text(product, "fake-key")
+
 
 class TestApiErrors(unittest.TestCase):
     def test_auth_error_is_user_friendly(self):
         from urllib.error import HTTPError
         err = HTTPError('https://example.org', 401, 'Unauthorized', {}, None)
-        with patch('instrumentcard.groq_client.urllib.request.urlopen', side_effect=err):
+        with patch('instrumentcard.zai_client.urllib.request.urlopen', side_effect=err):
             with self.assertRaisesRegex(GenerationError, 'авторизации'):
                 _api_call({'model': 'demo'}, 'fake')
 
     def test_rate_limit_is_user_friendly(self):
         from urllib.error import HTTPError
         err = HTTPError('https://example.org', 429, 'Too many requests', {}, None)
-        with patch('instrumentcard.groq_client.urllib.request.urlopen', side_effect=err):
+        with patch('instrumentcard.zai_client.urllib.request.urlopen', side_effect=err):
             with self.assertRaisesRegex(GenerationError, 'лимит'):
                 _api_call({'model': 'demo'}, 'fake')
 
