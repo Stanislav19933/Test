@@ -140,3 +140,94 @@ class TestApiErrors(unittest.TestCase):
     def test_rejects_unsafe_source_url(self):
         with self.assertRaises(InputError):
             parse_product('{"name":"X","source_url":"javascript:alert(1)"}')
+
+
+
+class TestTemporaryZaiRecovery(unittest.TestCase):
+    def setUp(self):
+        from instrumentcard.zai_client import TemporaryAPIError
+        self.temp_error = TemporaryAPIError
+        self.product = ProductInput(
+            name="Манометр", specs={"Диапазон": "0–10 МПа"},
+            description="Прибор предназначен для измерения давления. " * 5,
+        )
+        self.answer = {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({
+            "seo_title": "Манометр 0–10 МПа",
+            "seo_description": "Измерение давления 0–10 МПа.",
+            "search_queries": ["манометр", "манометр давления", "манометр 0–10 МПа"],
+            "commercial_block": "Измеряет давление.",
+        }, ensure_ascii=False)}}]}
+
+    @staticmethod
+    def http_error(status, code, retry_after=None):
+        from io import BytesIO
+        from urllib.error import HTTPError
+        headers = {"Retry-After": str(retry_after)} if retry_after is not None else {}
+        body = BytesIO(json.dumps({"error": {"code": str(code), "message": ""}}).encode())
+        return HTTPError("https://api.z.ai/api/paas/v4/chat/completions", status, "error", headers, body)
+
+    def test_1302_has_retry_after(self):
+        with patch("instrumentcard.zai_client.urllib.request.urlopen", side_effect=self.http_error(429, 1302, 6)):
+            with self.assertRaises(self.temp_error) as caught:
+                _api_call({"model": "glm-4.7-flash"}, "fake")
+        self.assertEqual(caught.exception.retry_after, 6)
+
+    def test_1305_is_temporary(self):
+        with patch("instrumentcard.zai_client.urllib.request.urlopen", side_effect=self.http_error(429, 1305)):
+            with self.assertRaises(self.temp_error):
+                _api_call({"model": "glm-4.7-flash"}, "fake")
+
+    def test_balance_and_quota_are_not_retried(self):
+        for code, part in ((1113, "тарифу"), (1310, "квота")):
+            with self.subTest(code=code):
+                with patch("instrumentcard.zai_client.urllib.request.urlopen", side_effect=self.http_error(429, code)):
+                    with self.assertRaisesRegex(GenerationError, part):
+                        _api_call({"model": "glm-4.7-flash"}, "fake")
+
+    def test_successful_retry(self):
+        models = []
+        def call(payload, key):
+            models.append(payload["model"])
+            if len(models) == 1:
+                raise self.temp_error("overloaded")
+            return self.answer
+        with patch("instrumentcard.zai_client._api_call", side_effect=call), patch("instrumentcard.zai_client.time.sleep") as sleep:
+            text = generate_text(self.product, "fake")
+        self.assertEqual(text.seo_title, "Манометр 0–10 МПа")
+        self.assertEqual(models, ["glm-4.7-flash", "glm-4.7-flash"])
+        sleep.assert_called_once()
+
+    def test_fallback_to_other_free_model(self):
+        models = []
+        def call(payload, key):
+            models.append(payload["model"])
+            if payload["model"] == "glm-4.7-flash":
+                raise self.temp_error("overloaded")
+            return self.answer
+        with patch("instrumentcard.zai_client._api_call", side_effect=call), patch("instrumentcard.zai_client.time.sleep"):
+            text = generate_text(self.product, "fake")
+        self.assertEqual(text.seo_title, "Манометр 0–10 МПа")
+        self.assertEqual(models, ["glm-4.7-flash", "glm-4.7-flash", "glm-4.5-flash"])
+
+    def test_both_unavailable_fail_honestly(self):
+        with patch("instrumentcard.zai_client._api_call", side_effect=self.temp_error("overloaded")), patch("instrumentcard.zai_client.time.sleep"):
+            with self.assertRaisesRegex(GenerationError, "Обе бесплатные модели"):
+                generate_text(self.product, "fake")
+
+    def test_keep_first_draft_if_correction_fails(self):
+        draft = GeneratedText(
+            seo_title="Манометр", seo_description="Измерение 0–10 МПа.",
+            search_queries=["манометр", "манометр купить", "манометр 0–10 МПа"],
+            commercial_block="Для измерения давления.",
+        )
+        attempts = []
+        def generator(product, key, corrections):
+            attempts.append(corrections)
+            if corrections:
+                raise GenerationError("limit")
+            return draft
+        card = generate_card(self.product, "fake", generator=generator)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(card.seo_title, "Манометр")
+        self.assertFalse(card.automated_checks_passed)
+        self.assertTrue(any("первый черновик" in w for w in card.review_warnings))

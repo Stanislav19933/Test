@@ -21,6 +21,15 @@ EXAMPLES = {
 }
 
 
+@st.cache_data(ttl=3600, max_entries=80, show_spinner=False)
+def cached_generate(product_json: str, _api_key: str) -> dict:
+    """Only successful identical inputs are cached for one hour; never cache secrets."""
+    from instrumentcard.models import ProductInput
+
+    product = ProductInput.model_validate_json(product_json)
+    return generate_card(product, _api_key).model_dump()
+
+
 def api_key() -> str:
     key = os.getenv("ZAI_API_KEY", "")
     if key:
@@ -39,7 +48,7 @@ def main() -> None:
     [data-testid='stMetricValue'] {font-size:1.6rem}
     </style>""", unsafe_allow_html=True)
     st.title("InstrumentCard AI")
-    st.caption("B2B-карточки измерительных приборов · проверка данных · GLM-4.7-Flash через Z.ai")
+    st.caption("B2B-карточки измерительных приборов · проверка данных · GLM-4.7-Flash / GLM-4.5-Flash через Z.ai")
 
     left, right = st.columns([1, 1.15], gap="large")
     with left:
@@ -103,18 +112,24 @@ def main() -> None:
                 source_url=example_product.source_url,
                 automated_checks_passed=False,
             ).model_dump()
+            st.session_state["card_source_json"] = example_product.model_dump_json()
         if st.button("Сгенерировать карточку", type="primary", use_container_width=True, disabled=not enabled):
             if not api_key():
                 st.error("API-ключ отсутствует. Укажите ZAI_API_KEY и перезапустите приложение.")
             else:
                 try:
                     with st.spinner("Генерируем и проверяем факты…"):
-                        st.session_state["card"] = generate_card(product, api_key()).model_dump()
+                        st.session_state["card"] = cached_generate(product.model_dump_json(), api_key())
+                        st.session_state["card_source_json"] = product.model_dump_json()
                 except GenerationError as exc:
+                    st.session_state.pop("card", None)
+                    st.session_state.pop("card_source_json", None)
                     st.error(str(exc))
                 except Exception:
+                    st.session_state.pop("card", None)
+                    st.session_state.pop("card_source_json", None)
                     st.error("Непредвиденная ошибка генерации. Проверьте журнал сервиса.")
-        st.caption("Примеры составлены по публичным карточкам souz-pribor.ru. Принадлежность товаров к исходному YML-фиду отдельно не подтверждена.")
+        st.caption("Удачные генерации одинакового JSON кэшируются на 1 час. Примеры взяты с souz-pribor.ru; принадлежность YML-фиду не подтверждена.")
 
     with right:
         st.subheader("02 / Результат")
@@ -127,8 +142,8 @@ def main() -> None:
             st.write("4. Замечания остаются видимыми до проверки контент-менеджером.")
             st.stop()
         card = CardOutput.model_validate(st.session_state["card"])
-        if product and product.name != card.product_name:
-            st.warning("Показан результат для предыдущего товара. Нажмите генерацию для новых данных.")
+        if not product or product.model_dump_json() != st.session_state.get("card_source_json"):
+            st.warning("Показан результат для других исходных данных. Нажмите генерацию для текущего JSON.")
         m1, m2, m3 = st.columns(3)
         m1.metric("SEO-заголовок", f"{len(card.seo_title)}/70")
         m2.metric("SEO-описание", f"{len(card.seo_description)} симв.")

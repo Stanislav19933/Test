@@ -43,12 +43,15 @@ def generate_card(
     draft = generator(product, api_key, None)
     problems = validate_draft(product, draft)
     if problems:
-        revised = generator(product, api_key, problems)
-        # Prefer the revision when it fixes more validation issues. If still
-        # insufficient, show the draft with explicit warnings; never label ready.
-        revised_problems = validate_draft(product, revised)
-        if len(revised_problems) <= len(problems):
-            draft, problems = revised, revised_problems
+        try:
+            revised = generator(product, api_key, problems)
+        except GenerationError:
+            # Preserve a useful first response if a corrective API call gets 429.
+            problems.append("Повторная генерация недоступна; показан первый черновик.")
+        else:
+            revised_problems = validate_draft(product, revised)
+            if len(revised_problems) <= len(problems):
+                draft, problems = revised, revised_problems
 
     missing = missing_fields(product)
     if len(product.description) < 100 and len(product.specs) < 3:
