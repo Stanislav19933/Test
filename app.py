@@ -10,7 +10,6 @@ import streamlit as st
 
 from instrumentcard.formatting import to_markdown
 from instrumentcard.zai_client import GenerationError
-from instrumentcard.service import IncompleteCardError
 from instrumentcard.models import CardOutput, GeneratedText
 from instrumentcard.quality import characteristic_list, missing_fields, validate_draft
 from instrumentcard.service import InputError, generate_card, parse_product
@@ -20,6 +19,14 @@ EXAMPLES = {
     "Термогигрометр CEM DT-83": ROOT / "samples" / "dt83.json",
     "Манометр РОСМА ТМ-510": ROOT / "samples" / "tm510.json",
 }
+
+
+class IncompleteCardError(GenerationError):
+    """Nonconforming card is visible to the user but not cached as ready."""
+
+    def __init__(self, card: CardOutput) -> None:
+        super().__init__("Карточка требует доработки.")
+        self.card = card
 
 
 @st.cache_data(ttl=3600, max_entries=80, show_spinner=False)
