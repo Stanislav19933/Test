@@ -154,10 +154,18 @@ def main() -> None:
                         st.session_state["card"] = cached_generate(product.model_dump_json(), api_key())
                         st.session_state["card_source_json"] = product.model_dump_json()
                 except IncompleteCardError as exc:
-                    st.session_state["card"] = exc.card.model_dump()
-                    st.session_state["card_source_json"] = product.model_dump_json()
-                    st.error("Карточка пока не соответствует требованиям ТЗ. "
-                             "Показан неполный черновик, который не кэшируется как готовый.")
+                    if product and is_exact_example(product, example_name):
+                        st.session_state["card"] = editorial_card(example_name).model_dump()
+                        st.session_state["card_source_json"] = product.model_dump_json()
+                        st.warning(
+                            "Ответ модели не прошёл проверку формата. "
+                            "Показан подготовленный вручную пример, это не результат AI."
+                        )
+                    else:
+                        st.session_state["card"] = exc.card.model_dump()
+                        st.session_state["card_source_json"] = product.model_dump_json()
+                        st.error("Карточка пока не соответствует требованиям ТЗ. "
+                                 "Показан неполный черновик, который не кэшируется как готовый.")
                 except GenerationError as exc:
                     if product and is_exact_example(product, example_name):
                         st.session_state["card"] = editorial_card(example_name).model_dump()
