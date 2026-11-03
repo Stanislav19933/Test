@@ -37,7 +37,7 @@ class TestStrictSeoContract(unittest.TestCase):
             return self.good if corrections else self.short
         result = generate_card(self.product, "fake", generator=generator)
         self.assertEqual(len(calls), 2)
-        self.assertTrue(any("900–1050" in instruction for instruction in calls[1]))
+        self.assertTrue(any("950–1050" in instruction for instruction in calls[1]))
         self.assertTrue(800 <= len(result.seo_description) <= 1200)
         self.assertTrue(result.automated_checks_passed)
 

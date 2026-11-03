@@ -30,7 +30,7 @@ class IncompleteCardError(GenerationError):
 
 
 @st.cache_data(ttl=3600, max_entries=80, show_spinner=False)
-def cached_generate(product_json: str, _api_key: str, rule_version: str = "seo-v4-structured") -> dict:
+def cached_generate(product_json: str, _api_key: str, rule_version: str = "seo-v5-paragraphs") -> dict:
     """Only successful identical inputs are cached for one hour; never cache secrets."""
     from instrumentcard.models import ProductInput
 
@@ -91,7 +91,7 @@ def main() -> None:
     [data-testid='stMetricValue'] {font-size:1.6rem}
     </style>""", unsafe_allow_html=True)
     st.title("InstrumentCard AI")
-    st.caption("B2B-карточки измерительных приборов · проверка данных · GLM-4.7-Flash / GLM-4.5-Flash через Z.ai · версия SEO v4")
+    st.caption("B2B-карточки измерительных приборов · проверка данных · GLM-4.7-Flash / GLM-4.5-Flash через Z.ai · версия SEO v5")
 
     left, right = st.columns([1, 1.15], gap="large")
     with left:
