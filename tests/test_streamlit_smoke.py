@@ -46,6 +46,32 @@ class TestStreamlitApp(unittest.TestCase):
         self.assertTrue(any("не ответ модели" in item.value.lower() for item in app.warning))
         self.assertTrue(800 <= len(card["seo_description"]) <= 1200)
 
+    def test_short_ai_response_shows_labelled_complete_example(self):
+        import json
+        from unittest.mock import patch
+
+        draft = {
+            "seo_title": "Термогигрометр CEM DT-83",
+            "seo_description": "Прибор предназначен для измерения температуры и влажности.",
+            "search_queries": ["DT-83 CEM", "термогигрометр", "измерение температуры"],
+            "commercial_block": "Для измерения температуры и влажности воздуха.",
+        }
+        response = {"choices": [{"finish_reason": "stop", "message": {
+            "content": json.dumps(draft, ensure_ascii=False),
+        }}]}
+        app = AppTest.from_file(APP_FILE, default_timeout=20)
+        app.secrets["ZAI_API_KEY"] = "fake-key-for-test"
+        with patch("instrumentcard.zai_client._api_call", return_value=response):
+            app.run()
+            self.assertEqual(len(app.exception), 0)
+            button = next(item for item in app.button if item.label == "Сгенерировать карточку")
+            button.click().run()
+        self.assertEqual(len(app.exception), 0)
+        card = app.session_state["card"]
+        self.assertTrue(any("РЕДАКТОРСКИЙ ПРИМЕР" in item for item in card["review_warnings"]))
+        self.assertTrue(800 <= len(card["seo_description"]) <= 1200)
+        self.assertTrue(any("не результат AI" in item.value for item in app.warning))
+
 
 if __name__ == "__main__":
     unittest.main()
