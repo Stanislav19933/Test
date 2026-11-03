@@ -29,11 +29,8 @@ def validate_draft(product: ProductInput, draft: GeneratedText) -> list[str]:
     problems: list[str] = []
     if not 1 <= len(draft.seo_title.strip()) <= 70:
         problems.append(f"SEO-заголовок: {len(draft.seo_title)} символов вместо 1–70")
-    content_is_sparse = len(product.description) < 100 and len(product.specs) < 3
-    if content_is_sparse:
-        if not draft.seo_description.strip():
-            problems.append("SEO-описание пустое")
-    elif not 800 <= len(draft.seo_description) <= 1200:
+    # A short SEO draft is always reported as nonconforming, including sparse inputs.
+    if not 800 <= len(draft.seo_description) <= 1200:
         problems.append(f"SEO-описание: {len(draft.seo_description)} символов вместо 800–1200")
     if not 3 <= len(draft.search_queries) <= 5:
         problems.append("Нужно 3–5 поисковых запросов")
