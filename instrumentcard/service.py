@@ -16,6 +16,14 @@ class InputError(Exception):
     """User-facing invalid input error."""
 
 
+class IncompleteCardError(GenerationError):
+    """Nonconforming card to show, but never cache as completed."""
+
+    def __init__(self, card: CardOutput) -> None:
+        super().__init__("Карточка требует доработки: автоматические проверки выявили замечания.")
+        self.card = card
+
+
 def parse_product(text: str) -> ProductInput:
     try:
         data: Any = json.loads(text)
@@ -28,6 +36,27 @@ def parse_product(text: str) -> ProductInput:
     except ValidationError as exc:
         field_errors = [".".join(map(str, err["loc"])) + ": " + err["msg"] for err in exc.errors()]
         raise InputError("Некорректные данные: " + "; ".join(field_errors)) from exc
+
+
+def _draft_score(product: ProductInput, draft: GeneratedText) -> tuple[int, int, int]:
+    issues = validate_draft(product, draft)
+    unsafe = any("Числовые значения отсутствуют" in item for item in issues)
+    n = len(draft.seo_description)
+    distance = max(0, 800 - n, n - 1200)
+    return (int(unsafe), len(issues), distance)
+
+
+def _revision_instructions(draft: GeneratedText, problems: list[str]) -> list[str]:
+    result = [*problems]
+    if not 800 <= len(draft.seo_description) <= 1200:
+        result.append(
+            f"Предыдущее SEO-описание имело {len(draft.seo_description)} символов. "
+            "Полностью перепиши его объёмом 900–1050 символов, разделив на 2–3 "
+            "связных абзаца. Используй исключительно подтверждённые факты "
+            "из исходного JSON; запрещено придумывать новые свойства, "
+            "повторять фразы и растягивать текст пустыми словами."
+        )
+    return result
 
 
 def generate_card(
@@ -44,18 +73,18 @@ def generate_card(
     problems = validate_draft(product, draft)
     if problems:
         try:
-            revised = generator(product, api_key, problems)
+            revised = generator(product, api_key, _revision_instructions(draft, problems))
         except GenerationError:
             # Preserve a useful first response if a corrective API call gets 429.
-            problems.append("Повторная генерация недоступна; показан первый черновик.")
+            problems.append("Повторная генерация временно недоступна; показан первый черновик с замечаниями.")
         else:
             revised_problems = validate_draft(product, revised)
-            if len(revised_problems) <= len(problems):
+            if _draft_score(product, revised) < _draft_score(product, draft):
                 draft, problems = revised, revised_problems
 
     missing = missing_fields(product)
     if len(product.description) < 100 and len(product.specs) < 3:
-        problems.append("Недостаточно исходных данных для гарантированного описания 800–1200 символов.")
+        problems.append("Исходных сведений мало: для длинного SEO-текста нужна редакторская проверка фактов.")
     if missing:
         problems.append("Перед публикацией необходимо проверить неполные исходные данные.")
     # Structured output is validated; semantic correctness still needs human review.
@@ -71,5 +100,6 @@ def generate_card(
         missing_fields=missing,
         review_warnings=problems,
         source_url=product.source_url,
-        automated_checks_passed=not bool(missing or validate_draft(product, draft)),
+        automated_checks_passed=not bool(missing or validate_draft(product, draft))
+        and not (len(product.description) < 100 and len(product.specs) < 3),
     )
