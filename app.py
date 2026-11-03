@@ -10,8 +10,9 @@ import streamlit as st
 
 from instrumentcard.formatting import to_markdown
 from instrumentcard.zai_client import GenerationError
+from instrumentcard.service import IncompleteCardError
 from instrumentcard.models import CardOutput, GeneratedText
-from instrumentcard.quality import characteristic_list, missing_fields
+from instrumentcard.quality import characteristic_list, missing_fields, validate_draft
 from instrumentcard.service import InputError, generate_card, parse_product
 
 ROOT = Path(__file__).resolve().parent
@@ -22,12 +23,22 @@ EXAMPLES = {
 
 
 @st.cache_data(ttl=3600, max_entries=80, show_spinner=False)
-def cached_generate(product_json: str, _api_key: str) -> dict:
+def cached_generate(product_json: str, _api_key: str, rule_version: str = "seo-v3-strict") -> dict:
     """Only successful identical inputs are cached for one hour; never cache secrets."""
     from instrumentcard.models import ProductInput
 
     product = ProductInput.model_validate_json(product_json)
-    return generate_card(product, _api_key).model_dump()
+    card = generate_card(product, _api_key)
+    # Incomplete SEO drafts cannot be cached as successful results.
+    issues = validate_draft(product, GeneratedText(
+        seo_title=card.seo_title,
+        seo_description=card.seo_description,
+        search_queries=card.search_queries,
+        commercial_block=card.commercial_block,
+    ))
+    if issues:
+        raise IncompleteCardError(card)
+    return card.model_dump()
 
 
 def api_key() -> str:
@@ -121,6 +132,11 @@ def main() -> None:
                     with st.spinner("Генерируем и проверяем факты…"):
                         st.session_state["card"] = cached_generate(product.model_dump_json(), api_key())
                         st.session_state["card_source_json"] = product.model_dump_json()
+                except IncompleteCardError as exc:
+                    st.session_state["card"] = exc.card.model_dump()
+                    st.session_state["card_source_json"] = product.model_dump_json()
+                    st.error("Карточка пока не соответствует требованиям ТЗ. "
+                             "Показан неполный черновик, который не кэшируется как готовый.")
                 except GenerationError as exc:
                     st.session_state.pop("card", None)
                     st.session_state.pop("card_source_json", None)
@@ -144,10 +160,16 @@ def main() -> None:
         card = CardOutput.model_validate(st.session_state["card"])
         if not product or product.model_dump_json() != st.session_state.get("card_source_json"):
             st.warning("Показан результат для других исходных данных. Нажмите генерацию для текущего JSON.")
+        if card.automated_checks_passed:
+            st.success("Автоматические проверки пройдены. Перед публикацией сверьте факты.")
+        else:
+            st.warning("Черновик требует проверки или исправления. Смотрите вкладку «Контроль качества».")
         m1, m2, m3 = st.columns(3)
         m1.metric("SEO-заголовок", f"{len(card.seo_title)}/70")
         m2.metric("SEO-описание", f"{len(card.seo_description)} симв.")
         m3.metric("Поисковые запросы", len(card.search_queries))
+        if not 800 <= len(card.seo_description) <= 1200:
+            st.error("SEO-описание вне диапазона 800–1200 символов: требование ТЗ не выполнено.")
         preview, audit = st.tabs(["Карточка", "Контроль качества"])
         with preview:
             st.markdown("**SEO-заголовок**")
