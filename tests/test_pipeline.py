@@ -231,3 +231,56 @@ class TestTemporaryZaiRecovery(unittest.TestCase):
         self.assertEqual(card.seo_title, "Манометр")
         self.assertFalse(card.automated_checks_passed)
         self.assertTrue(any("первый черновик" in w for w in card.review_warnings))
+
+
+class TestRobustZaiOutput(unittest.TestCase):
+    def setUp(self):
+        self.answer = {
+            "seo_title": "Манометр",
+            "seo_description": "Измерение давления 0–10 МПа.",
+            "search_queries": ["манометр", "измерение давления", "манометр 0–10 МПа"],
+            "commercial_block": "Для измерения давления.",
+        }
+
+    def test_complete_json_even_when_length_finish_is_accepted(self):
+        from instrumentcard.zai_client import _parse_answer
+        data = {"model": "glm-4.7-flash", "choices": [{"finish_reason": "length",
+            "message": {"content": json.dumps(self.answer, ensure_ascii=False)}}]}
+        self.assertEqual(_parse_answer(data).seo_title, "Манометр")
+
+    def test_markdown_fenced_json_is_parsed(self):
+        from instrumentcard.zai_client import _parse_answer
+        data = {"choices": [{"finish_reason": "stop", "message": {"content":
+            "```json\n" + json.dumps(self.answer, ensure_ascii=False) + "\n```"}}]}
+        self.assertEqual(_parse_answer(data).seo_title, "Манометр")
+
+    def test_extra_model_metadata_is_ignored(self):
+        from instrumentcard.zai_client import _parse_answer
+        data = {"choices": [{"message": {"content": json.dumps({**self.answer, "characteristics": {"Точность": "999"}}, ensure_ascii=False)}}]}
+        self.assertEqual(_parse_answer(data).seo_title, "Манометр")
+
+    def test_missing_output_fields_reported(self):
+        from instrumentcard.zai_client import _parse_answer, ModelOutputError
+        data = {"choices": [{"message": {"content": '{"seo_title":"Манометр"}'}}]}
+        with self.assertRaisesRegex(ModelOutputError, "не хватает полей"):
+            _parse_answer(data)
+
+    def test_invalid_json_is_format_error(self):
+        from instrumentcard.zai_client import _parse_answer, ModelOutputError
+        data = {"choices": [{"message": {"content": "Некорректно"}}]}
+        with self.assertRaisesRegex(ModelOutputError, "невалидный JSON"):
+            _parse_answer(data)
+
+    def test_format_error_retries_and_then_uses_other_model(self):
+        from instrumentcard.zai_client import ModelOutputError
+        product = ProductInput(name="Манометр", specs={"Диапазон": "0–10 МПа"})
+        calls = []
+        def fake(payload, key):
+            calls.append(payload["model"])
+            if payload["model"] == "glm-4.7-flash":
+                raise ModelOutputError("невалидный JSON", model=payload["model"])
+            return {"choices": [{"message": {"content": json.dumps(self.answer, ensure_ascii=False)}}]}
+        with patch("instrumentcard.zai_client._api_call", side_effect=fake), patch("instrumentcard.zai_client.time.sleep"):
+            result = generate_text(product, "fake-key")
+        self.assertEqual(result.seo_title, "Манометр")
+        self.assertEqual(calls, ["glm-4.7-flash", "glm-4.7-flash", "glm-4.5-flash"])

@@ -30,7 +30,7 @@ class IncompleteCardError(GenerationError):
 
 
 @st.cache_data(ttl=3600, max_entries=80, show_spinner=False)
-def cached_generate(product_json: str, _api_key: str, rule_version: str = "seo-v3-strict") -> dict:
+def cached_generate(product_json: str, _api_key: str, rule_version: str = "seo-v4-structured") -> dict:
     """Only successful identical inputs are cached for one hour; never cache secrets."""
     from instrumentcard.models import ProductInput
 
@@ -73,12 +73,6 @@ def editorial_card(example_name: str) -> CardOutput:
     )
 
 
-def is_exact_example(product, example_name: str) -> bool:
-    """Do not substitute a sample for an edited or user-supplied product."""
-    example = parse_product(EXAMPLES[example_name].read_text(encoding="utf-8"))
-    return product == example
-
-
 def api_key() -> str:
     key = os.getenv("ZAI_API_KEY", "")
     if key:
@@ -97,7 +91,7 @@ def main() -> None:
     [data-testid='stMetricValue'] {font-size:1.6rem}
     </style>""", unsafe_allow_html=True)
     st.title("InstrumentCard AI")
-    st.caption("B2B-карточки измерительных приборов · проверка данных · GLM-4.7-Flash / GLM-4.5-Flash через Z.ai · версия SEO v3")
+    st.caption("B2B-карточки измерительных приборов · проверка данных · GLM-4.7-Flash / GLM-4.5-Flash через Z.ai · версия SEO v4")
 
     left, right = st.columns([1, 1.15], gap="large")
     with left:
@@ -154,36 +148,27 @@ def main() -> None:
                         st.session_state["card"] = cached_generate(product.model_dump_json(), api_key())
                         st.session_state["card_source_json"] = product.model_dump_json()
                 except IncompleteCardError as exc:
-                    if product and is_exact_example(product, example_name):
-                        st.session_state["card"] = editorial_card(example_name).model_dump()
-                        st.session_state["card_source_json"] = product.model_dump_json()
-                        st.warning(
-                            "Ответ модели не прошёл проверку формата. "
-                            "Показан подготовленный вручную пример, это не результат AI."
-                        )
-                    else:
-                        st.session_state["card"] = exc.card.model_dump()
-                        st.session_state["card_source_json"] = product.model_dump_json()
-                        st.error("Карточка пока не соответствует требованиям ТЗ. "
-                                 "Показан неполный черновик, который не кэшируется как готовый.")
+                    # Never substitute a manually written sample for a failed AI result.
+                    st.session_state["card"] = exc.card.model_dump()
+                    st.session_state["card_source_json"] = product.model_dump_json()
+                    st.error(
+                        "Ответ AI получен, но карточка не прошла проверку требований. "
+                        "Это настоящий неполный черновик, который не кэшируется. "
+                        "Причины указаны во вкладке «Контроль качества»."
+                    )
                 except GenerationError as exc:
-                    if product and is_exact_example(product, example_name):
-                        st.session_state["card"] = editorial_card(example_name).model_dump()
-                        st.session_state["card_source_json"] = product.model_dump_json()
-                        st.warning(
-                            "Z.ai не смог ответить: " + str(exc) +
-                            " Вместо пустого результата показан подготовленный вручную "
-                            "пример. Это не ответ модели."
-                        )
-                    else:
-                        st.session_state.pop("card", None)
-                        st.session_state.pop("card_source_json", None)
-                        st.error(str(exc))
+                    st.session_state.pop("card", None)
+                    st.session_state.pop("card_source_json", None)
+                    st.error(str(exc))
+                    st.info(
+                        "Генерация не выполнена. Редакторский пример можно открыть "
+                        "отдельной кнопкой; он не является результатом AI."
+                    )
                 except Exception:
                     st.session_state.pop("card", None)
                     st.session_state.pop("card_source_json", None)
                     st.error("Непредвиденная ошибка генерации. Проверьте журнал сервиса.")
-        st.caption("Удачные генерации одинакового JSON кэшируются на 1 час. Примеры взяты с souz-pribor.ru; принадлежность YML-фиду не подтверждена.")
+        st.caption("Только корректные ответы AI кэшируются на 1 час. Редакторские примеры показываются лишь по отдельной кнопке. Принадлежность примеров к YML-фиду не подтверждена.")
 
     with right:
         st.subheader("02 / Результат")
