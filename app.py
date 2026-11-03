@@ -48,6 +48,37 @@ def cached_generate(product_json: str, _api_key: str, rule_version: str = "seo-v
     return card.model_dump()
 
 
+def editorial_card(example_name: str) -> CardOutput:
+    """A manually prepared sample, never presented as a live LLM response."""
+    sample = EXAMPLES[example_name]
+    product = parse_product(sample.read_text(encoding="utf-8"))
+    text_path = sample.with_name(sample.stem + "_editorial_example.json")
+    draft = GeneratedText.model_validate_json(text_path.read_text(encoding="utf-8"))
+    return CardOutput(
+        product_name=product.name,
+        manufacturer=product.manufacturer or "данных нет",
+        seo_title=draft.seo_title,
+        seo_description=draft.seo_description,
+        characteristics=characteristic_list(product),
+        search_queries=draft.search_queries,
+        commercial_block=draft.commercial_block,
+        missing_fields=missing_fields(product),
+        review_warnings=[
+            "РЕДАКТОРСКИЙ ПРИМЕР: подготовлен вручную, без вызова модели.",
+            *validate_draft(product, draft),
+            "Перед публикацией необходима проверка контент-менеджером.",
+        ],
+        source_url=product.source_url,
+        automated_checks_passed=False,
+    )
+
+
+def is_exact_example(product, example_name: str) -> bool:
+    """Do not substitute a sample for an edited or user-supplied product."""
+    example = parse_product(EXAMPLES[example_name].read_text(encoding="utf-8"))
+    return product == example
+
+
 def api_key() -> str:
     key = os.getenv("ZAI_API_KEY", "")
     if key:
@@ -66,7 +97,7 @@ def main() -> None:
     [data-testid='stMetricValue'] {font-size:1.6rem}
     </style>""", unsafe_allow_html=True)
     st.title("InstrumentCard AI")
-    st.caption("B2B-карточки измерительных приборов · проверка данных · GLM-4.7-Flash / GLM-4.5-Flash через Z.ai")
+    st.caption("B2B-карточки измерительных приборов · проверка данных · GLM-4.7-Flash / GLM-4.5-Flash через Z.ai · версия SEO v3")
 
     left, right = st.columns([1, 1.15], gap="large")
     with left:
@@ -111,25 +142,8 @@ def main() -> None:
         if not api_key():
             st.info("Для генерации нужен ZAI_API_KEY. Данные-примеры и их проверку можно открыть без ключа.")
         if st.button("Показать редакторский пример (без API)", use_container_width=True):
-            sample_path = EXAMPLES[example_name]
-            example_path = sample_path.with_name(sample_path.stem + "_editorial_example.json")
-            example_product = parse_product(sample_path.read_text(encoding="utf-8"))
-            example_text = GeneratedText.model_validate_json(example_path.read_text(encoding="utf-8"))
-            # An illustrative manually written result, clearly marked as such.
-            from instrumentcard.quality import validate_draft
-            st.session_state["card"] = CardOutput(
-                product_name=example_product.name,
-                manufacturer=example_product.manufacturer,
-                seo_title=example_text.seo_title,
-                seo_description=example_text.seo_description,
-                characteristics=characteristic_list(example_product),
-                search_queries=example_text.search_queries,
-                commercial_block=example_text.commercial_block,
-                missing_fields=missing_fields(example_product),
-                review_warnings=["РЕДАКТОРСКИЙ ПРИМЕР: составлен вручную без вызова API.", *validate_draft(example_product, example_text), "Перед публикацией необходима проверка контент-менеджером."],
-                source_url=example_product.source_url,
-                automated_checks_passed=False,
-            ).model_dump()
+            st.session_state["card"] = editorial_card(example_name).model_dump()
+            example_product = parse_product(EXAMPLES[example_name].read_text(encoding="utf-8"))
             st.session_state["card_source_json"] = example_product.model_dump_json()
         if st.button("Сгенерировать карточку", type="primary", use_container_width=True, disabled=not enabled):
             if not api_key():
@@ -145,9 +159,18 @@ def main() -> None:
                     st.error("Карточка пока не соответствует требованиям ТЗ. "
                              "Показан неполный черновик, который не кэшируется как готовый.")
                 except GenerationError as exc:
-                    st.session_state.pop("card", None)
-                    st.session_state.pop("card_source_json", None)
-                    st.error(str(exc))
+                    if product and is_exact_example(product, example_name):
+                        st.session_state["card"] = editorial_card(example_name).model_dump()
+                        st.session_state["card_source_json"] = product.model_dump_json()
+                        st.warning(
+                            "Z.ai не смог ответить: " + str(exc) +
+                            " Вместо пустого результата показан подготовленный вручную "
+                            "пример. Это не ответ модели."
+                        )
+                    else:
+                        st.session_state.pop("card", None)
+                        st.session_state.pop("card_source_json", None)
+                        st.error(str(exc))
                 except Exception:
                     st.session_state.pop("card", None)
                     st.session_state.pop("card_source_json", None)
