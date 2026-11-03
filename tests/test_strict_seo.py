@@ -41,6 +41,26 @@ class TestStrictSeoContract(unittest.TestCase):
         self.assertTrue(800 <= len(result.seo_description) <= 1200)
         self.assertTrue(result.automated_checks_passed)
 
+    def test_repair_includes_actual_previous_answer(self):
+        calls = []
+        def generate(product, key, corrections):
+            calls.append(corrections)
+            return self.good if corrections else self.short
+        generate_card(self.product, "fake", generator=generate)
+        self.assertEqual(len(calls), 2)
+        guidance = "\n".join(calls[1])
+        self.assertIn(self.short.seo_description, guidance)
+        self.assertIn("950–1050", guidance)
+
+    def test_already_valid_description_uses_one_generation(self):
+        calls = []
+        def generate(product, key, corrections):
+            calls.append(corrections)
+            return self.good
+        result = generate_card(self.product, "fake", generator=generate)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(result.automated_checks_passed)
+
     def test_partly_improved_description_is_still_incomplete(self):
         partial = self.good.model_copy(update={"seo_description": self.good.seo_description[:640]})
         result = generate_card(self.product, "fake",
